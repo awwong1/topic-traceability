@@ -167,3 +167,4 @@ $RECYCLE.BIN/
 
 data/*
 data/**/*
+*.sqlite3
