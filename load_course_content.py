@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import os
+import sys
+from csv import reader, field_size_limit
 from datetime import datetime
 from sqlite3 import connect, Error
 
@@ -19,12 +21,17 @@ COURSES = [
     "software_processes_and_agile_practices",
     "software_product_management_capstone"
 ]
+CSV_KWARGS = {
+    "delimiter": ",",
+    "quotechar": "\"",
+    "escapechar": "\\"
+}
 
 
 def create_database(conn):
     """create necessary database tables"""
     sql_create_courses = """
-    CREATE TABLE courses (
+    CREATE TABLE IF NOT EXISTS courses (
         course_id VARCHAR(50),
         course_slug VARCHAR(2000),
         course_name VARCHAR(2000),
@@ -49,7 +56,7 @@ def create_database(conn):
     )"""
 
     sql_create_course_branches = """
-    CREATE TABLE course_branches (
+    CREATE TABLE IF NOT EXISTS course_branches (
         course_id VARCHAR(50),
         course_branch_id VARCHAR(50),
         course_branch_changes_description VARCHAR(65535),
@@ -59,7 +66,7 @@ def create_database(conn):
     )"""
 
     sql_create_course_branch_items = """
-    CREATE TABLE course_branch_items (
+    CREATE TABLE IF NOT EXISTS course_branch_items (
         course_branch_id VARCHAR(255),
         course_item_id VARCHAR(255),
         course_lesson_id VARCHAR(255),
@@ -74,7 +81,7 @@ def create_database(conn):
     )"""
 
     sql_create_course_item_types = """
-    CREATE TABLE course_item_types (
+    CREATE TABLE IF NOT EXISTS course_item_types (
         course_item_type_id INT8,
         course_item_type_desc VARCHAR(255),
         course_item_type_category VARCHAR(255),
@@ -93,9 +100,60 @@ def create_database(conn):
     conn.commit()
 
 
+def load_data_from_csv(csv_path, conn, tbl_name):
+    c = conn.cursor()
+    with open(csv_path) as csvfile:
+        csv_reader = reader(csvfile, **CSV_KWARGS)
+        headers = next(csv_reader)
+        for line in csv_reader:
+            q_s = ",".join(["?", ] * len(line))
+            c.execute(
+                f"INSERT OR REPLACE INTO {tbl_name} VALUES ({q_s})", line)
+    conn.commit()
+
+
+def load_course_data(course_data_path, conn):
+    for course_file in sorted(os.listdir(course_data_path)):
+        csv_path = os.path.join(course_data_path, course_file)
+        if course_file == "courses.csv":
+            load_data_from_csv(csv_path, conn, "courses")
+        elif course_file == "course_branches.csv":
+            load_data_from_csv(csv_path, conn, "course_branches")
+        elif course_file == "course_branch_items.csv":
+            load_data_from_csv(csv_path, conn, "course_branch_items")
+        elif course_file == "course_item_types.csv":
+            load_data_from_csv(csv_path, conn, "course_item_types")
+
+
+def parse_and_load_course_branch_item(course_data_path, conn, course_zip_name):
+    content_path = os.path.join(course_data_path, "course_branch_item_content")
+    course_slug = course_zip_name.replace("_","-")
+
+    # almost like this is sql or something...
+    sql_select_course_id = (
+        "SELECT course_id, course_name FROM courses WHERE course_slug = (?)"
+    )
+    sql_select_course_branches = (
+        "SELECT course_branch_id FROM course_branches " +
+        "WHERE " +
+        "course_id = (?)"
+    )
+
+    c = conn.cursor()
+    c.execute(sql_select_course_id, (course_slug,))
+
+    (course_id, course_name) = c.fetchone() # row
+    c.execute(sql_select_course_branches, (str(course_id),))
+    rows = c.fetchall() # row
+
+    course_branch_ids = [branch_data[0] for branch_data in rows]
+
+    
+
 def main():
     conn = None
     try:
+        field_size_limit(sys.maxsize)  # GHMatches csv threw error
         conn = connect(DB_FILE)
 
         sc_start = datetime.now()
@@ -104,7 +162,11 @@ def main():
         create_database(conn)
 
         for course in COURSES:
+            print(course)
             course_data_path = os.path.join(DATA_PATH, course)
+            load_course_data(course_data_path, conn)
+            parse_and_load_course_branch_item(course_data_path, conn, course)
+        conn.commit()
 
         sc_end = datetime.now()
         print(f"Ended {sc_end}")
