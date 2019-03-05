@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
+import json
 import os
 import sys
 from csv import reader, field_size_limit
 from datetime import datetime
 from sqlite3 import connect, Error
+from bs4 import BeautifulSoup
+from gensim.parsing.preprocessing import preprocess_string
+
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 DB_NAME = "dump_coursera_partial.sqlite3"
@@ -65,6 +69,25 @@ def create_database(conn):
         PRIMARY KEY (course_id, course_branch_id)
     )"""
 
+    sql_create_course_branch_modules = """
+    CREATE TABLE IF NOT EXISTS course_branch_modules (
+        course_branch_id VARCHAR(50),
+        course_module_id VARCHAR(50),
+        course_branch_module_order INT8,
+        course_branch_module_name VARCHAR(2000),
+        course_branch_module_desc VARCHAR(10000)
+    )"""
+
+    sql_create_course_branch_lessons = """
+    CREATE TABLE IF NOT EXISTS course_branch_lessons (
+        course_branch_id VARCHAR(50),
+        course_lesson_id VARCHAR(50),
+        course_module_id VARCHAR(50),
+        course_branch_lesson_order INT8,
+        course_branch_lesson_name VARCHAR(10000)
+    );
+    """
+
     sql_create_course_branch_items = """
     CREATE TABLE IF NOT EXISTS course_branch_items (
         course_branch_id VARCHAR(255),
@@ -90,12 +113,55 @@ def create_database(conn):
         PRIMARY KEY (course_item_type_id)
     )"""
 
+    sql_create_discussion_course_forums = """
+    CREATE TABLE IF NOT EXISTS discussion_course_forums (
+        discussion_forum_id VARCHAR(50),
+        course_branch_id VARCHAR(50),
+        discussion_course_forum_title VARCHAR(20000),
+        discussion_course_forum_description VARCHAR(20000),
+        discussion_course_forum_order INT8
+    )"""
+
+    sql_create_discussion_questions = """
+    CREATE TABLE IF NOT EXISTS discussion_questions (
+        discussion_question_id VARCHAR(50),
+        ualberta_user_id VARCHAR(50) NOT NULL,
+        discussion_question_title VARCHAR(20000),
+        discussion_question_details VARCHAR(20000),
+        discussion_question_context_type VARCHAR(50),
+        course_id VARCHAR(50),
+        course_module_id VARCHAR(50),
+        course_item_id VARCHAR(50),
+        discussion_forum_id VARCHAR(50),
+        country_cd VARCHAR(2),
+        group_id VARCHAR(50),
+        discussion_question_created_ts DATETIME,
+        discussion_question_updated_ts DATETIME
+    )"""
+
+    sql_create_discussion_answers = """
+    CREATE TABLE IF NOT EXISTS discussion_answers (
+        discussion_answer_id VARCHAR(50),
+        ualberta_user_id VARCHAR(50) NOT NULL,
+        course_id VARCHAR(50),
+        discussion_answer_content VARCHAR(20000),
+        discussion_question_id VARCHAR(50),
+        discussion_answer_parent_discussion_answer_id VARCHAR(50),
+        discussion_answer_created_ts DATETIME,
+        discussion_answer_updated_ts DATETIME
+    )"""
+
     c = conn.cursor()
 
     c.execute(sql_create_courses)
     c.execute(sql_create_course_branches)
+    c.execute(sql_create_course_branch_modules)
+    c.execute(sql_create_course_branch_lessons)
     c.execute(sql_create_course_item_types)
     c.execute(sql_create_course_branch_items)
+    c.execute(sql_create_discussion_course_forums)
+    c.execute(sql_create_discussion_questions)
+    c.execute(sql_create_discussion_answers)
 
     conn.commit()
 
@@ -119,36 +185,150 @@ def load_course_data(course_data_path, conn):
             load_data_from_csv(csv_path, conn, "courses")
         elif course_file == "course_branches.csv":
             load_data_from_csv(csv_path, conn, "course_branches")
+        elif course_file == "course_branch_modules.csv":
+            load_data_from_csv(csv_path, conn, "course_branch_modules")
+        elif course_file == "course_branch_lessons.csv":
+            load_data_from_csv(csv_path, conn, "course_branch_lessons")
         elif course_file == "course_branch_items.csv":
             load_data_from_csv(csv_path, conn, "course_branch_items")
         elif course_file == "course_item_types.csv":
             load_data_from_csv(csv_path, conn, "course_item_types")
+        elif course_file == "discussion_course_forums.csv":
+            load_data_from_csv(csv_path, conn, "discussion_course_forums")
+        elif course_file == "discussion_questions.csv":
+            load_data_from_csv(csv_path, conn, "discussion_questions")
+        elif course_file == "discussion_answers.csv":
+            load_data_from_csv(csv_path, conn, "discussion_answers")
 
 
 def parse_and_load_course_branch_item(course_data_path, conn, course_zip_name):
+    """take all of the course branch item content and create vocabulary
+    """
     content_path = os.path.join(course_data_path, "course_branch_item_content")
-    course_slug = course_zip_name.replace("_","-")
+    course_slug = course_zip_name.replace("_", "-")
 
-    # almost like this is sql or something...
     sql_select_course_id = (
-        "SELECT course_id, course_name FROM courses WHERE course_slug = (?)"
-    )
-    sql_select_course_branches = (
-        "SELECT course_branch_id FROM course_branches " +
-        "WHERE " +
-        "course_id = (?)"
+        "SELECT DISTINCT course_branch_items.course_branch_id, " +
+        "course_item_id, course_branch_module_name, " +
+        "course_branch_lesson_name, course_branch_item_name FROM " +
+        "course_branch_modules, course_branch_lessons, course_branch_items, " +
+        "course_branches, courses WHERE course_slug = (?) " +
+        "AND courses.course_id == course_branches.course_id " +
+        "AND course_branches.course_branch_id == course_branch_items.course_branch_id " +
+        "AND course_branch_items.course_lesson_id == course_branch_lessons.course_lesson_id " +
+        "AND course_branch_lessons.course_module_id == course_branch_modules.course_module_id"
     )
 
     c = conn.cursor()
     c.execute(sql_select_course_id, (course_slug,))
 
-    (course_id, course_name) = c.fetchone() # row
-    c.execute(sql_select_course_branches, (str(course_id),))
-    rows = c.fetchall() # row
+    # module name > lesson name > item name > to processed vocabulary (list of words)
+    course_vocabulary = {}
 
-    course_branch_ids = [branch_data[0] for branch_data in rows]
+    rows = c.fetchmany()
+    while rows:
+        for row in rows:
+            (course_branch_id, course_item_id, course_branch_module_name,
+             course_branch_lesson_name, course_branch_item_name,) = row
+            print(row)
+            # load the raw json file for branch item
+            course_branch_item_path = os.path.join(
+                content_path, "{}-{}.json".format(course_branch_id, course_item_id))
+            with open(course_branch_item_path, "r") as cbif:
+                # attempt to load the json file, otherwise continue
+                try:
+                    raw_cbi = json.load(cbif)
+                except Exception as e:
+                    print(e)
+                    continue
 
-    
+                try:
+                    if raw_cbi["message"] == "" and raw_cbi["statusCode"] == 204 and raw_cbi["reason"] == "ignore assesments":
+                        continue
+                except KeyError:
+                    pass
+
+                try:
+                    if raw_cbi["message"] == "" and raw_cbi["statusCode"] == 404:
+                        continue
+                except KeyError:
+                    pass
+
+                try:
+                    if raw_cbi["message"] == None and raw_cbi["errorCode"] == "Not Authorized":
+                        continue
+                except KeyError:
+                    pass
+
+                try:
+                    if raw_cbi["message"].startswith("No item ItemId(") and raw_cbi["errorCode"] == None:
+                        continue
+                except KeyError:
+                    pass
+
+                normalized_processed_text = None
+
+                try:
+                    # try to get the definition value of the item
+                    definition_raw_html = raw_cbi["linked"]["openCourseAssets.v1"][0]["definition"]["value"]
+                    definition_text = " ".join(BeautifulSoup(
+                        definition_raw_html, "html.parser").stripped_strings)
+                    normalized_processed_text = preprocess_string(
+                        definition_text)
+                    update_course_vocabulary(
+                        course_vocabulary, course_branch_module_name,
+                        course_branch_lesson_name, course_branch_item_name,
+                        normalized_processed_text)
+                    continue
+                except KeyError:
+                    pass
+
+                try:
+                    # check if the branch item is a video with subtitles, get subtitles
+                    subtitles_lookup = raw_cbi["linked"]["onDemandVideos.v1"][0]["subtitlesTxt"]
+                    if not subtitles_lookup.keys():
+                        continue  # no subtitles for the video
+                    subtitle_filepath = course_branch_item_path + ".subtitles.txt"
+                    with open(subtitle_filepath, "r") as subfp:
+                        subtitle_raw_text = "".join(subfp.readlines())
+                        normalized_processed_text = preprocess_string(
+                            subtitle_raw_text)
+                    update_course_vocabulary(
+                        course_vocabulary, course_branch_module_name,
+                        course_branch_lesson_name, course_branch_item_name,
+                        normalized_processed_text)
+                    continue
+                except KeyError:
+                    pass
+
+                raise Error("unhandled cbi")
+
+        rows = c.fetchmany()
+
+    # save the course_vocabulary to disk
+    vocab_filepath = os.path.join(
+        course_data_path, "..", "vocabulary.{}.json".format(course_slug))
+    with open(vocab_filepath, "w") as vocab_file:
+        json.dump(course_vocabulary, vocab_file)
+
+
+def update_course_vocabulary(course_vocabulary, course_branch_module_name, course_branch_lesson_name, course_branch_item_name, normalized_processed_text):
+    course_branch_module = course_vocabulary.get(course_branch_module_name, {})
+    course_branch_lesson = course_branch_module.get(
+        course_branch_lesson_name, {})
+    course_branch_item = course_branch_lesson.get(course_branch_item_name, [])
+    course_branch_item.extend(normalized_processed_text)
+
+    course_branch_lesson[course_branch_item_name] = course_branch_item
+    course_branch_module[course_branch_lesson_name] = course_branch_lesson
+    course_vocabulary[course_branch_module_name] = course_branch_module
+
+
+def parse_and_load_discussion_questions(course_data_path, conn, course_zip_name):
+    """take all of the course branch item content and create vocabulary
+    """
+    return
+
 
 def main():
     conn = None
@@ -166,6 +346,7 @@ def main():
             course_data_path = os.path.join(DATA_PATH, course)
             load_course_data(course_data_path, conn)
             parse_and_load_course_branch_item(course_data_path, conn, course)
+            parse_and_load_discussion_questions(course_data_path, conn, course)
         conn.commit()
 
         sc_end = datetime.now()
