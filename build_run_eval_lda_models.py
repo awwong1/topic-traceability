@@ -266,10 +266,10 @@ def main():
         answer_results = eval_answers(
             course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, c_start)
 
-        print("SAVING RESULTS FOR {} (e: {})".format(
+        print("SAVING VECTORS FOR {} (e: {})".format(
             course_name, datetime.now() - c_start))
         results_fp = os.path.join(
-            DIR_PATH, "data", "results.{}.pkl".format(course_name))
+            DIR_PATH, "data", "eval.{}.pkl".format(course_name))
         with open(results_fp, "wb") as rf:
             dump({
                 "mapping": mapping,
