@@ -121,7 +121,11 @@ class LLDA:
                     self.n_z_t[new_z, t] += 1
                     self.n_z[new_z] += 1
                     
-            sys.stderr.write("iter {}, perplexity {}\n".format(_iter, self.perplexity()))
+            print("\rllda: iter {:0>3d}, perplexity {:.3f}".format(_iter, self.perplexity()), end="")
+            if _iter % 10 == 0:
+                print()
+        print()
+
 
     def inference(self, new_doc = [], label = [], iteration = 50):
         V = len(self.vocas)

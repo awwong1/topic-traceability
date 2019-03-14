@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 import os
 import json
+from datetime import datetime
 from gensim.test.utils import common_texts
 from gensim.corpora.dictionary import Dictionary
 from gensim.models import HdpModel, LdaModel, AuthorTopicModel
 from numpy import argsort
+from pickle import dump
 
 from llda_impl import LLDA
 
+DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
-def extract_course_texts(course_vocabulary, mapping):
+
+def extract_course_texts_mapping(course_vocabulary):
+    mapping = {}
     course_texts = []
     for module_name, lessons_vocabulary in course_vocabulary.items():
         for lesson_name, items_vocabulary in lessons_vocabulary.items():
@@ -34,7 +39,7 @@ def extract_course_texts(course_vocabulary, mapping):
                     mapping["items"] = item_mapping
 
                     course_texts.append(document_words)
-    return course_texts
+    return course_texts, mapping
 
 
 def build_lda_models(course_corpus, course_dictionary, mapping, course_texts):
@@ -68,8 +73,8 @@ def build_lda_models(course_corpus, course_dictionary, mapping, course_texts):
     llda_alpha = 1
     llda_beta = 0.01
     llda_iterations = 50
-    labels = []
-    corpus = []
+    llda_labels = []
+    llda_corpus = []
     labelset = set()
     for course_text_id in range(0, len(course_texts)):
         doc_labels = []
@@ -90,12 +95,12 @@ def build_lda_models(course_corpus, course_dictionary, mapping, course_texts):
                 doc_labels.append("I: {}".format(item_name))
                 break
 
-        labels.append(doc_labels)
-        corpus.append(course_texts[course_text_id])
+        llda_labels.append(doc_labels)
+        llda_corpus.append(course_texts[course_text_id])
         labelset = labelset.union(doc_labels)
 
-    llda_model = LLDA(llda_alpha, llda_beta, K=len(labels))
-    llda_model.set_corpus(corpus, labels)
+    llda_model = LLDA(llda_alpha, llda_beta, K=len(llda_labels))
+    llda_model.set_corpus(llda_corpus, llda_labels)
     llda_model.train(iteration=llda_iterations)
 
     # phi = llda.phi()
@@ -103,77 +108,177 @@ def build_lda_models(course_corpus, course_dictionary, mapping, course_texts):
     #     print ("\n-- label %d : %s" % (k + 1, label))
     #     for w in argsort(-phi[k + 1])[:10]:
     #         print("%s: %.4f" % (llda.vocas[w], phi[k + 1,w]))
-    return lda_model, hdp_model, at_model, llda_model
+    return lda_model, hdp_model, at_model, llda_model, llda_labels
+
+
+def eval_answers(course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, c_start, rhot=0.1):
+    answer_results = {}
+    answer_fp = os.path.join(
+        DIR_PATH, "data", "answers.{}.json".format(course_name))
+    with open(answer_fp, "r") as af:
+        course_answers = json.load(af)
+    for answer_id, answer_content in course_answers.items():
+        answer_corpus = course_dictionary.doc2bow(answer_content)
+        chunk = (answer_corpus, )
+        # discussion answer relation over set 100 topics
+        lda_a_gamma = lda_model.inference(chunk=chunk)[0]
+        # discussion answer relation over capped 150 topics
+        hdp_a_gamma = hdp_model.inference(chunk=chunk)[0]
+
+        # author to doc relation over 100 topics (each post is a new author)
+        at_a_gamma = at_model.inference(
+            chunk=chunk,
+            author2doc={answer_id: (0, )},
+            doc2author={0: (answer_id,)},
+            rhot=rhot
+        )[0]
+        # raw text OK here
+        llda_a_gamma = llda_model.inference(answer_content)
+
+        answer_results[answer_id] = {
+            "lda": lda_a_gamma,
+            "hdp": hdp_a_gamma,
+            "atm": at_a_gamma,
+            "llda": llda_a_gamma,
+            "all_words": answer_content,
+            "unutilized_words": [w for w in answer_content if w not in course_dictionary.token2id]
+        }
+        print("\ra_eval {}: {}/{} (e: {})".format(
+            answer_id,
+            len(answer_results.keys()), len(course_answers),
+            datetime.now() - c_start), end="")
+    print()
+    return answer_results
+
+
+def eval_questions(course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, c_start, rhot=0.1):
+    question_results = {}
+    question_fp = os.path.join(
+        DIR_PATH, "data", "questions.{}.json".format(course_name))
+    with open(question_fp, "r") as qf:
+        # question_id > content
+        course_questions = json.load(qf)
+    for question_id, question_words in course_questions.items():
+        # convert to gensim format for gensim models
+        question_corpus = course_dictionary.doc2bow(question_words)
+        chunk = (question_corpus, )
+        # discussion question relation over set 100 topics
+        lda_q_gamma = lda_model.inference(chunk=chunk)[0]
+        # discussion question relation over capped 150 topics
+        hdp_q_gamma = hdp_model.inference(chunk=chunk)[0]
+
+        # author to doc relation over 100 topics (each post is a new author)
+        at_q_gamma = at_model.inference(
+            chunk=chunk,
+            author2doc={question_id: (0, )},
+            doc2author={0: (question_id,)},
+            rhot=rhot
+        )[0]
+        # raw text OK here
+        llda_q_gamma = llda_model.inference(question_words)
+
+        question_results[question_id] = {
+            "lda": lda_q_gamma,
+            "hdp": hdp_q_gamma,
+            "atm": at_q_gamma,
+            "llda": llda_q_gamma,
+            "all_words": question_words,
+            "unutilized_words": [w for w in question_words if w not in course_dictionary.token2id]
+        }
+        print("\rq_eval {}: {}/{} (e: {})".format(
+            question_id,
+            len(question_results.keys()), len(course_questions),
+            datetime.now() - c_start), end="")
+    print()
+    return question_results
+
+
+def eval_material(course_texts, course_corpus, lda_model, hdp_model, at_model, llda_model, c_start, rhot=0.1):
+    material_results = {}
+    for course_doc_idx in range(0, len(course_texts)):
+        idx_course_corpus = course_corpus[course_doc_idx]
+        chunk = (idx_course_corpus, )
+        lda_c_gamma = lda_model.inference(chunk=chunk)[0]
+        hdp_c_gamma = hdp_model.inference(chunk=chunk)[0]
+        at_c_gamma = at_model.inference(
+            chunk=chunk,
+            author2doc=at_model.author2doc,
+            doc2author=at_model.doc2author,
+            rhot=rhot
+        )[0]
+        idx_course_texts = course_texts[course_doc_idx]
+        llda_c_gamma = llda_model.inference(idx_course_texts)
+        material_results[course_doc_idx] = {
+            "lda": lda_c_gamma,
+            "hdp": hdp_c_gamma,
+            "atm": at_c_gamma,
+            "llda": llda_c_gamma
+        }
+        print("\rc_eval {}/{} (e: {})".format(
+            course_doc_idx +
+            1, len(course_texts), datetime.now() - c_start), end="")
+    print()
+    return material_results
 
 
 def main():
-    DIR_PATH = os.path.dirname(os.path.realpath(__file__))
-
-    DATA_JSON = [
-        "agile-planning-for-software-products.json",
-        "client-needs-and-software-requirements.json",
-        "design-patterns.json",
-        "introduction-to-software-product-management.json",
-        "object-oriented-design.json",
-        "reviews-and-metrics-for-software-improvements.json",
-        "service-oriented-architecture.json",
-        "software-architecture.json",
-        "software-processes-and-agile-practices.json",
-        "software-product-management-capstone.json",
+    COURSE_NAME_STUBS = [
+        "agile-planning-for-software-products",
+        "client-needs-and-software-requirements",
+        "design-patterns",
+        "introduction-to-software-product-management",
+        "object-oriented-design",
+        "reviews-and-metrics-for-software-improvements",
+        "service-oriented-architecture",
+        "software-architecture",
+        "software-processes-and-agile-practices",
+        "software-product-management-capstone",
     ]
 
     # for course_name, course_vocabulary in vocabs.items():
-    for course_name in DATA_JSON:
+    for course_name in COURSE_NAME_STUBS:
         # ==== Load the processed vocabulary into memory ==== #
         vocab_fp = os.path.join(
-            DIR_PATH, "data", "vocabulary.{}".format(course_name))
+            DIR_PATH, "data", "vocabulary.{}.json".format(course_name))
         with open(vocab_fp, "r") as vf:
             # course name / module name / lesson name / item name > item
             course_vocabulary = json.load(vf)
 
         # ==== Generate Course Corpus, Dictionary ==== #
-        mapping = {}  # holds the mapping for author topic models
-        course_texts = extract_course_texts(course_vocabulary, mapping)
+        course_texts, mapping = extract_course_texts_mapping(course_vocabulary)
         course_dictionary = Dictionary(course_texts)
         course_corpus = [course_dictionary.doc2bow(
             text) for text in course_texts]
 
-        print("BUILDING MODELS FOR {}".format(course_name))
-        lda_model, hdp_model, at_model, llda_model = build_lda_models(
+        c_start = datetime.now()
+
+        print("BUILDING MODELS FOR {} ({})".format(course_name, c_start))
+        lda_model, hdp_model, at_model, llda_model, llda_labels = build_lda_models(
             course_corpus, course_dictionary,
             mapping, course_texts)
 
-        print("EVALUATING {} FORUM ACTIVITY".format(course_name))
-        question_results = {}
-        question_fp = os.path.join(
-            DIR_PATH, "data", "questions.{}".format(course_name))
-        with open(question_fp, "r") as qf:
-            # question_id > content
-            course_questions = json.load(qf)
-        for question_id, question_words in course_questions.items():
-            # convert to gensim format for gensim models
-            question_corpus = course_dictionary.doc2bow(question_words)
-            chunk = (question_corpus, )
-            # discussion question relation over set 100 topics
-            lda_q_gamma = lda_model.inference(chunk=chunk)[0]
-            # discussion question relation over capped 150 topics
-            hdp_q_gamma = hdp_model.inference(chunk=chunk)
+        print("EVALUATING FORUM ACTIVITY {} (e: {})".format(
+            course_name, datetime.now() - c_start))
+        material_results = eval_material(
+            course_texts, course_corpus, lda_model, hdp_model, at_model, llda_model, c_start)
+        question_results = eval_questions(
+            course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, c_start)
+        answer_results = eval_answers(
+            course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, c_start)
 
-            # author to doc relation over 100 topics (each post is a new author)
-            q_author2doc = {**at_model.author2doc}
-            for q_author in q_author2doc.keys():
-                q_author2doc[q_author] = ()
-            q_author2doc[question_id] = (0, )
-            at_q_gamma = at_model.inference(
-                chunk=chunk,
-                author2doc=q_author2doc,
-                doc2author={0: (question_id,)},
-                rhot=0.1
-            )
-            # raw text OK here
-            llda_q_gamma = llda_model.inference(question_words)
-
-            print("q")
+        print("SAVING RESULTS FOR {} (e: {})".format(
+            course_name, datetime.now() - c_start))
+        results_fp = os.path.join(
+            DIR_PATH, "data", "results.{}.pkl".format(course_name))
+        with open(results_fp, "w") as rf:
+            dump({
+                "mapping": mapping,
+                "material_results": material_results,
+                "question_results": question_results,
+                "answer_results": answer_results},
+                rf)
+        print("{} done! (e: {})\n".format(
+            course_name, datetime.now() - c_start))
 
 
 if __name__ == "__main__":
