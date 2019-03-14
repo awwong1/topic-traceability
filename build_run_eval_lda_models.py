@@ -270,7 +270,7 @@ def main():
             course_name, datetime.now() - c_start))
         results_fp = os.path.join(
             DIR_PATH, "data", "results.{}.pkl".format(course_name))
-        with open(results_fp, "w") as rf:
+        with open(results_fp, "wb") as rf:
             dump({
                 "mapping": mapping,
                 "material_results": material_results,
