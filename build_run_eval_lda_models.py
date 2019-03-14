@@ -9,9 +9,8 @@ from numpy import argsort
 from llda_impl import LLDA
 
 
-def extract_course_texts(course_name, course_vocabulary, mapping):
+def extract_course_texts(course_vocabulary, mapping):
     course_texts = []
-    # print(course_name)
     for module_name, lessons_vocabulary in course_vocabulary.items():
         for lesson_name, items_vocabulary in lessons_vocabulary.items():
             for item_name, document_words in items_vocabulary.items():
@@ -61,13 +60,14 @@ def build_lda_models(course_corpus, course_dictionary, mapping, course_texts):
     at_model = AuthorTopicModel(
         corpus=course_corpus,
         id2word=course_dictionary,
+        author2doc=author_to_doc
     )
 
     # ==== Train Labeled LDA ====
     # explicitly supervised, labeled LDA
     llda_alpha = 1
     llda_beta = 0.01
-    llda_iterations = 100
+    llda_iterations = 50
     labels = []
     corpus = []
     labelset = set()
@@ -110,47 +110,70 @@ def main():
     DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
     DATA_JSON = [
-        "vocabulary.agile-planning-for-software-products.json",
-        "vocabulary.client-needs-and-software-requirements.json",
-        "vocabulary.design-patterns.json",
-        "vocabulary.introduction-to-software-product-management.json",
-        "vocabulary.object-oriented-design.json",
-        "vocabulary.reviews-and-metrics-for-software-improvements.json",
-        "vocabulary.service-oriented-architecture.json",
-        "vocabulary.software-architecture.json",
-        "vocabulary.software-processes-and-agile-practices.json",
-        "vocabulary.software-product-management-capstone.json",
+        "agile-planning-for-software-products.json",
+        "client-needs-and-software-requirements.json",
+        "design-patterns.json",
+        "introduction-to-software-product-management.json",
+        "object-oriented-design.json",
+        "reviews-and-metrics-for-software-improvements.json",
+        "service-oriented-architecture.json",
+        "software-architecture.json",
+        "software-processes-and-agile-practices.json",
+        "software-product-management-capstone.json",
     ]
 
-    # course name / module name / lesson name / item name > item
-    vocabs = {}
-
-    for vocab_text_file in DATA_JSON:
-        vocab_fp = os.path.join(DIR_PATH, "data", vocab_text_file)
+    # for course_name, course_vocabulary in vocabs.items():
+    for course_name in DATA_JSON:
+        # ==== Load the processed vocabulary into memory ==== #
+        vocab_fp = os.path.join(
+            DIR_PATH, "data", "vocabulary.{}".format(course_name))
         with open(vocab_fp, "r") as vf:
-            vocab = json.load(vf)
-            vocabs[vocab_text_file] = vocab
+            # course name / module name / lesson name / item name > item
+            course_vocabulary = json.load(vf)
 
-    doc_lens = []
-    for course_name, course_vocabulary in vocabs.items():
         # ==== Generate Course Corpus, Dictionary ==== #
         mapping = {}  # holds the mapping for author topic models
-        course_texts = extract_course_texts(
-            course_name, course_vocabulary, mapping)
+        course_texts = extract_course_texts(course_vocabulary, mapping)
         course_dictionary = Dictionary(course_texts)
         course_corpus = [course_dictionary.doc2bow(
             text) for text in course_texts]
-        doc_lens.extend([len(x) for x in course_texts])
 
         print("BUILDING MODELS FOR {}".format(course_name))
         lda_model, hdp_model, at_model, llda_model = build_lda_models(
             course_corpus, course_dictionary,
             mapping, course_texts)
-        
-        print("RANKING {} FORUM ACTIVITY".format(course_name))
 
-    # print(len(doc_lens))
-    # print(max(doc_lens), min(doc_lens), sum(doc_lens)/len(doc_lens))
+        print("EVALUATING {} FORUM ACTIVITY".format(course_name))
+        question_results = {}
+        question_fp = os.path.join(
+            DIR_PATH, "data", "questions.{}".format(course_name))
+        with open(question_fp, "r") as qf:
+            # question_id > content
+            course_questions = json.load(qf)
+        for question_id, question_words in course_questions.items():
+            # convert to gensim format for gensim models
+            question_corpus = course_dictionary.doc2bow(question_words)
+            chunk = (question_corpus, )
+            # discussion question relation over set 100 topics
+            lda_q_gamma = lda_model.inference(chunk=chunk)[0]
+            # discussion question relation over capped 150 topics
+            hdp_q_gamma = hdp_model.inference(chunk=chunk)
+
+            # author to doc relation over 100 topics (each post is a new author)
+            q_author2doc = {**at_model.author2doc}
+            for q_author in q_author2doc.keys():
+                q_author2doc[q_author] = ()
+            q_author2doc[question_id] = (0, )
+            at_q_gamma = at_model.inference(
+                chunk=chunk,
+                author2doc=q_author2doc,
+                doc2author={0: (question_id,)},
+                rhot=0.1
+            )
+            # raw text OK here
+            llda_q_gamma = llda_model.inference(question_words)
+
+            print("q")
 
 
 if __name__ == "__main__":

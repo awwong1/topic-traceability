@@ -230,7 +230,6 @@ def parse_and_load_course_branch_item(course_data_path, conn, course_zip_name):
         for row in rows:
             (course_branch_id, course_item_id, course_branch_module_name,
              course_branch_lesson_name, course_branch_item_name,) = row
-            print(row)
             # load the raw json file for branch item
             course_branch_item_path = os.path.join(
                 content_path, "{}-{}.json".format(course_branch_id, course_item_id))
@@ -325,9 +324,67 @@ def update_course_vocabulary(course_vocabulary, course_branch_module_name, cours
 
 
 def parse_and_load_discussion_questions(course_data_path, conn, course_zip_name):
-    """take all of the course branch item content and create vocabulary
+    """load, parse, process discussion questions
     """
-    return
+    course_slug = course_zip_name.replace("_", "-")
+    sql_select_discussion_question = (
+        "SELECT discussion_question_id, discussion_question_title, " +
+        "discussion_question_details " +
+        "FROM discussion_questions, courses WHERE " +
+        "discussion_questions.course_id == courses.course_id AND " +
+        "courses.course_slug == (?)"
+    )
+
+    c = conn.cursor()
+    c.execute(sql_select_discussion_question, (course_slug,))
+
+    course_questions = {}
+
+    rows = c.fetchmany()
+    while rows:
+        for row in rows:
+            question_id, question_title, question_details = row
+            course_questions[question_id] = (
+                preprocess_string(question_title) +
+                preprocess_string(question_details)
+            )
+        rows = c.fetchmany()
+
+    # save the course_questions to disk
+    questions_filepath = os.path.join(
+        course_data_path, "..", "questions.{}.json".format(course_slug))
+    with open(questions_filepath, "w") as questions_file:
+        json.dump(course_questions, questions_file)
+
+
+def parse_and_load_discussion_answers(course_data_path, conn, course_zip_name):
+    """load, parse, process discussion answers
+    """
+    course_slug = course_zip_name.replace("_", "-")
+    sql_select_discussion_answer = (
+        "SELECT discussion_answer_id, discussion_answer_content " +
+        "FROM discussion_answers, courses WHERE " +
+        "discussion_answers.course_id == courses.course_id AND " +
+        "courses.course_slug == (?)"
+    )
+
+    c = conn.cursor()
+    c.execute(sql_select_discussion_answer, (course_slug,))
+
+    course_answers = {}
+
+    rows = c.fetchmany()
+    while rows:
+        for row in rows:
+            answer_id, answer_content = row
+            course_answers[answer_id] = preprocess_string(answer_content)
+        rows = c.fetchmany()
+
+    # save the course_answers to disk
+    answers_filepath = os.path.join(
+        course_data_path, "..", "answers.{}.json".format(course_slug))
+    with open(answers_filepath, "w") as answers_file:
+        json.dump(course_answers, answers_file)
 
 
 def main():
@@ -347,6 +404,7 @@ def main():
             load_course_data(course_data_path, conn)
             parse_and_load_course_branch_item(course_data_path, conn, course)
             parse_and_load_discussion_questions(course_data_path, conn, course)
+            parse_and_load_discussion_answers(course_data_path, conn, course)
         conn.commit()
 
         sc_end = datetime.now()
