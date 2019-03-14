@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""Pull coursera information from their on demand API using authenticated user
+cookie as credentials.
+"""
 import csv
 import json
 import os
