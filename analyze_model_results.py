@@ -19,9 +19,7 @@ def analyze_course_results(course_name, course_results):
     answer_results = course_results["answer_results"]
 
     # question_id: { atm: [(doc, distance)], hdp: [(doc, distance)]}
-    questions_topic_mapping = {
-        "llda": {}
-    }
+    questions_topic_mapping = { }
     distance_functions = {
         "cosine": (cosine, True),  # function, reverse
         # "euclidean": (euclidean, False)
@@ -39,7 +37,8 @@ def analyze_course_results(course_name, course_results):
             question_topic_map = {
                 "atm_rank": [],
                 "hdp_rank": [],
-                "lda_rank": []
+                "lda_rank": [],
+                "llda_rank": []
             }
 
             for doc_id, material_result in material_results.items():
@@ -56,6 +55,10 @@ def analyze_course_results(course_name, course_results):
                     doc_id,
                     distance_function(lda, m_lda)
                 ))
+                question_topic_map["llda_rank"].append((
+                    doc_id,
+                    distance_function(llda, m_llda)
+                ))
 
             question_topic_map["atm_rank"].sort(
                 key=lambda tup: tup[1], reverse=sort_reverse)
@@ -63,10 +66,8 @@ def analyze_course_results(course_name, course_results):
                 key=lambda tup: tup[1], reverse=sort_reverse)
             question_topic_map["lda_rank"].sort(
                 key=lambda tup: tup[1], reverse=sort_reverse)
-
-            questions_topic_mapping[dist_func_name][question_id] = question_topic_map
-        questions_topic_mapping["llda"][question_id] = sorted(
-            enumerate(llda), key=lambda tup: tup[1], reverse=True)
+            question_topic_map["llda_rank"].sort(
+                key=lambda tup: tup[1], reverse=sort_reverse)
 
         print("\rq: {}/{} (e: {})".format(
             len(questions_topic_mapping[dist_func_name]),
