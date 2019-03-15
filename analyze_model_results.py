@@ -19,13 +19,15 @@ def analyze_course_results(course_name, course_results):
     answer_results = course_results["answer_results"]
 
     # question_id: { atm: [(doc, distance)], hdp: [(doc, distance)]}
-    questions_topic_mapping = { }
+    questions_topic_mapping = {}
+    answers_topic_mapping = {}
     distance_functions = {
         "cosine": (cosine, False),  # function, reverse
         # "euclidean": (euclidean, False)
     }
     for key in distance_functions.keys():
         questions_topic_mapping[key] = {}
+        answers_topic_mapping[key] = {}
 
     for question_id, question_result in question_results.items():
         all_words = question_result["all_words"]
@@ -33,46 +35,28 @@ def analyze_course_results(course_name, course_results):
         atm, hdp, lda, llda = flatten_gammas(question_result)
 
         for dist_func_name, distance_options in distance_functions.items():
-            distance_function, sort_reverse = distance_options
-            question_topic_map = {
-                "atm_rank": [],
-                "hdp_rank": [],
-                "lda_rank": [],
-                "llda_rank": []
-            }
-
-            for doc_id, material_result in material_results.items():
-                m_atm, m_hdp, m_lda, m_llda = flatten_gammas(material_result)
-                question_topic_map["atm_rank"].append((
-                    doc_id,
-                    distance_function(atm, m_atm)
-                ))
-                question_topic_map["hdp_rank"].append((
-                    doc_id,
-                    distance_function(hdp, m_hdp)
-                ))
-                question_topic_map["lda_rank"].append((
-                    doc_id,
-                    distance_function(lda, m_lda)
-                ))
-                question_topic_map["llda_rank"].append((
-                    doc_id,
-                    distance_function(llda, m_llda)
-                ))
-
-            question_topic_map["atm_rank"].sort(
-                key=lambda tup: tup[1], reverse=sort_reverse)
-            question_topic_map["hdp_rank"].sort(
-                key=lambda tup: tup[1], reverse=sort_reverse)
-            question_topic_map["lda_rank"].sort(
-                key=lambda tup: tup[1], reverse=sort_reverse)
-            question_topic_map["llda_rank"].sort(
-                key=lambda tup: tup[1], reverse=sort_reverse)
-        questions_topic_mapping[dist_func_name][question_id] = question_topic_map
+            question_topic_map = generate_topic_map(
+                distance_options, material_results, atm, hdp, lda, llda)
+            questions_topic_mapping[dist_func_name][question_id] = question_topic_map
 
         print("\rq: {}/{} (e: {})".format(
             len(questions_topic_mapping[dist_func_name]),
             len(question_results),
+            datetime.now() - t_start), end="")
+    print()
+    for answer_id, answer_result in answer_results.items():
+        all_words = question_result["all_words"]
+        unutilized_words = question_result["unutilized_words"]
+        atm, hdp, lda, llda = flatten_gammas(answer_result)
+
+        for dist_func_name, distance_options in distance_functions.items():
+            answer_topic_map = generate_topic_map(
+                distance_options, material_results, atm, hdp, lda, llda)
+            answers_topic_mapping[dist_func_name][answer_id] = answer_topic_map
+
+        print("\ra: {}/{} (e: {})".format(
+            len(answers_topic_mapping[dist_func_name]),
+            len(answer_results),
             datetime.now() - t_start), end="")
 
     model_res_fp = os.path.join(
@@ -80,9 +64,49 @@ def analyze_course_results(course_name, course_results):
     with open(model_res_fp, "w") as mf:
         dump({
             "docid_to_labels": docid_to_labels,
-            "questions_topic_mapping": questions_topic_mapping
+            "questions_topic_mapping": questions_topic_mapping,
+            "answers_topic_mapping": answers_topic_mapping
         }, mf)
     print()
+
+
+def generate_topic_map(distance_options, material_results, atm, hdp, lda, llda):
+    distance_function, sort_reverse = distance_options
+    topic_map = {
+        "atm_rank": [],
+        "hdp_rank": [],
+        "lda_rank": [],
+        "llda_rank": []
+    }
+
+    for doc_id, material_result in material_results.items():
+        m_atm, m_hdp, m_lda, m_llda = flatten_gammas(material_result)
+        topic_map["atm_rank"].append((
+            doc_id,
+            distance_function(atm, m_atm)
+        ))
+        topic_map["hdp_rank"].append((
+            doc_id,
+            distance_function(hdp, m_hdp)
+        ))
+        topic_map["lda_rank"].append((
+            doc_id,
+            distance_function(lda, m_lda)
+        ))
+        topic_map["llda_rank"].append((
+            doc_id,
+            distance_function(llda, m_llda)
+        ))
+
+    topic_map["atm_rank"].sort(
+        key=lambda tup: tup[1], reverse=sort_reverse)
+    topic_map["hdp_rank"].sort(
+        key=lambda tup: tup[1], reverse=sort_reverse)
+    topic_map["lda_rank"].sort(
+        key=lambda tup: tup[1], reverse=sort_reverse)
+    topic_map["llda_rank"].sort(
+        key=lambda tup: tup[1], reverse=sort_reverse)
+    return topic_map
 
 
 def flatten_gammas(result):
