@@ -111,7 +111,7 @@ def build_lda_models(course_corpus, course_dictionary, mapping, course_texts):
     return lda_model, hdp_model, at_model, llda_model, llda_labels
 
 
-def eval_answers(course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, c_start, rhot=0.1):
+def eval_answers(course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, tfidf_model, c_start, rhot=0.1):
     answer_results = {}
     answer_fp = os.path.join(
         DIR_PATH, "data", "answers.{}.json".format(course_name))
@@ -135,6 +135,8 @@ def eval_answers(course_name, course_dictionary, lda_model, hdp_model, at_model,
         # raw text OK here
         llda_a_gamma = llda_model.inference(answer_content)
 
+        tfidf_vector = tfidf_model[answer_corpus]
+
         answer_results[answer_id] = {
             "lda": lda_a_gamma,
             "hdp": hdp_a_gamma,
@@ -151,7 +153,7 @@ def eval_answers(course_name, course_dictionary, lda_model, hdp_model, at_model,
     return answer_results
 
 
-def eval_questions(course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, c_start, rhot=0.1):
+def eval_questions(course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, tfidf_model, c_start, rhot=0.1):
     question_results = {}
     question_fp = os.path.join(
         DIR_PATH, "data", "questions.{}.json".format(course_name))
@@ -177,11 +179,14 @@ def eval_questions(course_name, course_dictionary, lda_model, hdp_model, at_mode
         # raw text OK here
         llda_q_gamma = llda_model.inference(question_words)
 
+        tfidf_vector = tfidf_model[question_corpus]
+
         question_results[question_id] = {
             "lda": lda_q_gamma,
             "hdp": hdp_q_gamma,
             "atm": at_q_gamma,
             "llda": llda_q_gamma,
+            "tfidf": tfidf_vector,
             "all_words": question_words,
             "unutilized_words": [w for w in question_words if w not in course_dictionary.token2id]
         }
@@ -193,7 +198,7 @@ def eval_questions(course_name, course_dictionary, lda_model, hdp_model, at_mode
     return question_results
 
 
-def eval_material(course_texts, course_corpus, lda_model, hdp_model, at_model, llda_model, c_start, rhot=0.1):
+def eval_material(course_texts, course_corpus, lda_model, hdp_model, at_model, llda_model, tfidf_model, c_start, rhot=0.1):
     material_results = {}
     for course_doc_idx in range(0, len(course_texts)):
         idx_course_corpus = course_corpus[course_doc_idx]
@@ -208,11 +213,15 @@ def eval_material(course_texts, course_corpus, lda_model, hdp_model, at_model, l
         )[0]
         idx_course_texts = course_texts[course_doc_idx]
         llda_c_gamma = llda_model.inference(idx_course_texts)
+
+        tfidf_vector = tfidf_model[idx_course_corpus]
+
         material_results[course_doc_idx] = {
             "lda": lda_c_gamma,
             "hdp": hdp_c_gamma,
             "atm": at_c_gamma,
-            "llda": llda_c_gamma
+            "llda": llda_c_gamma,
+            "tfidf": tfidf_vector,
         }
         print("\rc_eval {}/{} (e: {})".format(
             course_doc_idx +
@@ -266,11 +275,11 @@ def main():
         print("EVALUATING FORUM ACTIVITY {} (e: {})".format(
             course_name, datetime.now() - c_start))
         material_results = eval_material(
-            course_texts, course_corpus, lda_model, hdp_model, at_model, llda_model, c_start)
+            course_texts, course_corpus, lda_model, hdp_model, at_model, llda_model, tfidf_model, c_start)
         question_results = eval_questions(
-            course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, c_start)
+            course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, tfidf_model, c_start)
         answer_results = eval_answers(
-            course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, c_start)
+            course_name, course_dictionary, lda_model, hdp_model, at_model, llda_model, tfidf_model, c_start)
 
         print("SAVING VECTORS FOR {} (e: {})".format(
             course_name, datetime.now() - c_start))
