@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import os
+import json
 from PyInquirer import prompt, Separator
+
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 COURSE_NAME_STUBS = [
@@ -18,7 +20,10 @@ COURSE_NAME_STUBS = [
 
 
 def inquire_course(course_name):
-    
+    model_res_fp = os.path.join(
+        DIR_PATH, "data", "model_res.{}.json".format(course_name))
+    with open(model_res_fp, "r") as mf:
+        course_model_results = json.load(mf)
     pass
 
 def main():

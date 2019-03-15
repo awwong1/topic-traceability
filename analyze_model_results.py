@@ -21,7 +21,7 @@ def analyze_course_results(course_name, course_results):
     # question_id: { atm: [(doc, distance)], hdp: [(doc, distance)]}
     questions_topic_mapping = { }
     distance_functions = {
-        "cosine": (cosine, True),  # function, reverse
+        "cosine": (cosine, False),  # function, reverse
         # "euclidean": (euclidean, False)
     }
     for key in distance_functions.keys():
@@ -68,6 +68,7 @@ def analyze_course_results(course_name, course_results):
                 key=lambda tup: tup[1], reverse=sort_reverse)
             question_topic_map["llda_rank"].sort(
                 key=lambda tup: tup[1], reverse=sort_reverse)
+        questions_topic_mapping[dist_func_name][question_id] = question_topic_map
 
         print("\rq: {}/{} (e: {})".format(
             len(questions_topic_mapping[dist_func_name]),
