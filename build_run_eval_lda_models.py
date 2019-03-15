@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from gensim.test.utils import common_texts
 from gensim.corpora.dictionary import Dictionary
-from gensim.models import HdpModel, LdaModel, AuthorTopicModel
+from gensim.models import HdpModel, LdaModel, AuthorTopicModel, TfidfModel
 from numpy import argsort
 from pickle import dump
 
@@ -70,8 +70,8 @@ def build_lda_models(course_corpus, course_dictionary, mapping, course_texts):
 
     # ==== Train Labeled LDA ====
     # explicitly supervised, labeled LDA
-    llda_alpha = 1
-    llda_beta = 0.01
+    llda_alpha = 0.01
+    llda_beta = 0.001
     llda_iterations = 50
     llda_labels = []
     llda_corpus = []
@@ -257,6 +257,12 @@ def main():
             course_corpus, course_dictionary,
             mapping, course_texts)
 
+        # baseline TF-IDF
+        tfidf_model = TfidfModel(
+            corpus=course_corpus,
+            id2word=course_dictionary,
+        )
+
         print("EVALUATING FORUM ACTIVITY {} (e: {})".format(
             course_name, datetime.now() - c_start))
         material_results = eval_material(
@@ -277,6 +283,11 @@ def main():
                 "question_results": question_results,
                 "answer_results": answer_results},
                 rf)
+        tfidf_fp = os.path.join(
+            DIR_PATH, "data", "tfidf.{}.pkl".format(course_name))
+        with open(tfidf_fp, "wb") as tfidf_f:
+            tfidf_model.save(tfidf_f)
+
         print("{} done! (e: {})\n".format(
             course_name, datetime.now() - c_start))
 

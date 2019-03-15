@@ -5,11 +5,12 @@ from numpy import ravel
 from pickle import load
 from json import dump
 from scipy.spatial.distance import cosine, euclidean
+from gensim.models import TfidfModel
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
 
-def analyze_course_results(course_name, course_results):
+def analyze_course_results(course_name, course_results, tfidf_model):
     t_start = datetime.now()
     print("ANALYZING {} ({})".format(course_name, t_start))
     docid_to_labels = invert_mapping(course_results["mapping"])
@@ -159,7 +160,12 @@ def main():
         with open(results_fp, "rb") as rf:
             course_results = load(rf)
 
-        analyze_course_results(course_name, course_results)
+        tfidf_fp = os.path.join(
+            DIR_PATH, "data", "tfidf.{}.pkl".format(course_name))
+        with open(tfidf_fp, "wb") as tfidf_f:
+            tfidf_model = TfidfModel.load(tfidf_f)
+
+        analyze_course_results(course_name, course_results, tfidf_model)
 
 
 if __name__ == "__main__":
