@@ -5,6 +5,7 @@ import pickle
 from PyInquirer import prompt, Separator
 from sqlite3 import connect, Error
 import xml.dom.minidom
+from gensim.parsing.preprocessing import preprocess_string
 
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
@@ -39,8 +40,11 @@ def setup_course_inquire(course_name):
         course_model_results = json.load(mf)
     label_results = {}
     if os.path.isfile(man_label_fp):
-        with open(man_label_fp, "r") as lf:
-            label_results = json.load(lf)
+        try:
+            with open(man_label_fp, "r") as lf:
+                label_results = json.load(lf)
+        except json.decoder.JSONDecodeError:
+            os.remove(man_label_fp)
 
     conn = None
     try:
@@ -61,8 +65,7 @@ def inquire_questions(course_name, label_results,
         s_module, s_lesson, s_item = v
         b_module = label_tree.get(s_module, {})
         b_lesson = b_module.get(s_lesson, {})
-        b_item = b_lesson.get(s_item, -1)
-        b_item = doc_id
+        b_item = b_lesson.get(s_item, doc_id)
         b_lesson[s_item] = b_item
         b_module[s_lesson] = b_lesson
         label_tree[s_module] = b_module
@@ -82,6 +85,21 @@ def inquire_questions(course_name, label_results,
             question_id, question_title, question_details = row
 
             while True:
+                os.system("clear")
+                print("Progress: {}/{} ({}: useful)".format(
+                    len(label_results.get("questions", {})),
+                    len(course_results["question_results"]),
+                    len([val for val in label_results.get(
+                        "questions", {}).values() if int(val) >= 0])
+                ))
+                print("TITLE: {}".format(question_title))
+                dom = xml.dom.minidom.parseString(question_details)
+                print(dom.toprettyxml(indent=" "), end="")
+                print("=" * 40)
+                proc_words = preprocess_string(question_title) + preprocess_string(question_details)
+                print(proc_words)
+
+
                 if question_id in label_results.get("questions", {}):
                     prior_label_id = label_results.get(
                         "questions", {}).get(question_id, None)
@@ -90,72 +108,79 @@ def inquire_questions(course_name, label_results,
                     prior_label_str = " > ".join(prior_label_l)
                     if prior_label_id is not None and not prior_label_str:
                         prior_label_str = "unlabelable"
-                    print("Already labelled as '{}'".format(prior_label_str))
-
-                print("TITLE: {}".format(question_title))
-                dom = xml.dom.minidom.parseString(question_details)
-                print(dom.toprettyxml(indent=" "))
+                    print("{} already labelled as '{}'".format(
+                        question_id, prior_label_str))
 
                 # label module
                 inq_module_choices = list(label_tree.keys())
+                inq_module_choices.sort()
                 inq_module_choices.extend(
-                    [Separator(), "skip", "unlabelable", "back"])
+                    [Separator(), "back", "unlabelable", "skip"])
                 inquiry_module = [{
                     "type": "list",
-                    "name": "s_module",
+                    "name": "u_module",
                     "message": "Choose Course Module:",
                     "choices": inq_module_choices
                 }]
                 answers = prompt(inquiry_module)
-                s_module = answers.get("s_module", None)
-                if s_module is None:
+                u_module = answers.get("u_module", None)
+                if u_module is None:
                     exit()
-                elif s_module == "skip":
+                elif u_module == "skip":
                     break
-                elif s_module == "unlabelable":
+                elif u_module == "unlabelable":
                     lq_results = label_results.get("questions", {})
                     lq_results[question_id] = -1  # unlabelable
                     label_results["questions"] = lq_results
-                    with open(man_label_fp, "w"):
-                        json.dump(label_results)
-                elif s_module == "back":
+                    with open(man_label_fp, "w") as ml_fp:
+                        json.dump(label_results, ml_fp)
+                    break
+                elif u_module == "back":
                     return
 
                 # label lesson
-                inq_lesson_choices = list(label_tree[s_module].keys())
+                inq_lesson_choices = list(label_tree[u_module].keys())
+                inq_lesson_choices.sort()
                 inq_lesson_choices.extend([Separator(), "back"])
                 inquiry_lesson = [{
                     "type": "list",
-                    "name": "s_lesson",
+                    "name": "u_lesson",
                     "message": "Choose Course Lesson:",
                     "choices": inq_lesson_choices
                 }]
                 answers = prompt(inquiry_lesson)
-                s_lesson = answers.get("s_lesson", None)
-                if s_lesson is None:
+                u_lesson = answers.get("u_lesson", None)
+                if u_lesson is None:
                     exit()
-                elif s_lesson == "back":
+                elif u_lesson == "back":
                     continue
 
                 # label item
-                inq_item_choices = label_tree[s_module][s_lesson]
+                inq_item_choices = list(label_tree[u_module][u_lesson].keys())
+                inq_item_choices.sort()
                 inq_item_choices.extend([Separator(), "back"])
                 inquiry_item = [{
                     "type": "list",
-                    "name": "s_item",
+                    "name": "u_item",
                     "message": "Choose Course Item:",
                     "choices": inq_item_choices
                 }]
                 answers = prompt(inquiry_item)
-                s_item == answers.get("s_item", None)
-                if s_item is None:
+                u_item = answers.get("u_item", None)
+                if u_item is None:
                     exit()
-                elif s_item == "back":
+                elif u_item == "back":
                     continue
-                
-                
+
+                with open(man_label_fp, "w") as ml_fp:
+                    question_labelled = label_results.get("questions", {})
+                    question_labelled[question_id] = label_tree[u_module][u_lesson][u_item]
+                    label_results["questions"] = question_labelled
+                    json.dump(label_results, ml_fp)
+                    break
 
         rows = c.fetchmany()
+    print("No more values to label!")
 
 
 def inquire_course(course_name, label_results,
@@ -163,8 +188,12 @@ def inquire_course(course_name, label_results,
     question_labelled = label_results.get("questions", {})
     answer_labelled = label_results.get("answers", {})
 
-    print("Labelled {}/{} questions.".format(len(question_labelled),
-                                             len(course_results["question_results"])))
+    print("Labelled {}/{} questions. ({} useful)".format(
+        len(question_labelled),
+        len(course_results["question_results"]),
+        len([val for val in label_results.get(
+            "questions", {}).values() if int(val) >= 0])
+    ))
     print("Labelled {}/{} answers.".format(len(answer_labelled),
                                            len(course_results["answer_results"])))
     inquiry_choices = [
