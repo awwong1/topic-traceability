@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import numpy as np
 from datetime import datetime
 from numpy import ravel
 from pickle import load
@@ -10,7 +11,7 @@ from gensim.models import TfidfModel
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
 
-def analyze_course_results(course_name, course_results, tfidf_model):
+def analyze_course_results(course_name, course_results, idf_vec_size):
     t_start = datetime.now()
     print("ANALYZING {} ({})".format(course_name, t_start))
     docid_to_labels = invert_mapping(course_results["mapping"])
@@ -33,32 +34,33 @@ def analyze_course_results(course_name, course_results, tfidf_model):
     for question_id, question_result in question_results.items():
         all_words = question_result["all_words"]
         unutilized_words = question_result["unutilized_words"]
-        atm, hdp, lda, llda = flatten_gammas(question_result)
+        atm, hdp, lda, llda, tfidf = flatten_gammas(question_result, idf_vec_size)
 
         for dist_func_name, distance_options in distance_functions.items():
             question_topic_map = generate_topic_map(
-                distance_options, material_results, atm, hdp, lda, llda)
+                distance_options, material_results, atm, hdp, lda, llda, tfidf, idf_vec_size)
             questions_topic_mapping[dist_func_name][question_id] = question_topic_map
 
         print("\rq: {}/{} (e: {})".format(
             len(questions_topic_mapping[dist_func_name]),
             len(question_results),
             datetime.now() - t_start), end="")
-    print()
-    for answer_id, answer_result in answer_results.items():
-        all_words = question_result["all_words"]
-        unutilized_words = question_result["unutilized_words"]
-        atm, hdp, lda, llda = flatten_gammas(answer_result)
+    # just look at questions for time being
+    # print()
+    # for answer_id, answer_result in answer_results.items():
+    #     all_words = question_result["all_words"]
+    #     unutilized_words = question_result["unutilized_words"]
+    #     atm, hdp, lda, llda, tfidf = flatten_gammas(answer_result, idf_vec_size)
 
-        for dist_func_name, distance_options in distance_functions.items():
-            answer_topic_map = generate_topic_map(
-                distance_options, material_results, atm, hdp, lda, llda)
-            answers_topic_mapping[dist_func_name][answer_id] = answer_topic_map
+    #     for dist_func_name, distance_options in distance_functions.items():
+    #         answer_topic_map = generate_topic_map(
+    #             distance_options, material_results, atm, hdp, lda, llda, tfidf, idf_vec_size)
+    #         answers_topic_mapping[dist_func_name][answer_id] = answer_topic_map
 
-        print("\ra: {}/{} (e: {})".format(
-            len(answers_topic_mapping[dist_func_name]),
-            len(answer_results),
-            datetime.now() - t_start), end="")
+    #     print("\ra: {}/{} (e: {})".format(
+    #         len(answers_topic_mapping[dist_func_name]),
+    #         len(answer_results),
+    #         datetime.now() - t_start), end="")
 
     model_res_fp = os.path.join(
         DIR_PATH, "data", "model_res.{}.json".format(course_name))
@@ -71,17 +73,18 @@ def analyze_course_results(course_name, course_results, tfidf_model):
     print()
 
 
-def generate_topic_map(distance_options, material_results, atm, hdp, lda, llda):
+def generate_topic_map(distance_options, material_results, atm, hdp, lda, llda, tfidf, idf_vec_size):
     distance_function, sort_reverse = distance_options
     topic_map = {
         "atm_rank": [],
         "hdp_rank": [],
         "lda_rank": [],
-        "llda_rank": []
+        "llda_rank": [],
+        "tfidf_rank": [],
     }
 
     for doc_id, material_result in material_results.items():
-        m_atm, m_hdp, m_lda, m_llda = flatten_gammas(material_result)
+        m_atm, m_hdp, m_lda, m_llda, m_tfidf = flatten_gammas(material_result, idf_vec_size)
         topic_map["atm_rank"].append((
             doc_id,
             distance_function(atm, m_atm)
@@ -98,6 +101,10 @@ def generate_topic_map(distance_options, material_results, atm, hdp, lda, llda):
             doc_id,
             distance_function(llda, m_llda)
         ))
+        topic_map["tfidf_rank"].append((
+            doc_id,
+            distance_function(tfidf, m_tfidf)
+        ))
 
     topic_map["atm_rank"].sort(
         key=lambda tup: tup[1], reverse=sort_reverse)
@@ -107,15 +114,22 @@ def generate_topic_map(distance_options, material_results, atm, hdp, lda, llda):
         key=lambda tup: tup[1], reverse=sort_reverse)
     topic_map["llda_rank"].sort(
         key=lambda tup: tup[1], reverse=sort_reverse)
+    topic_map["tfidf_rank"].sort(
+        key=lambda tup: tup[1], reverse=sort_reverse)
     return topic_map
 
 
-def flatten_gammas(result):
+def flatten_gammas(result, idf_vec_size):
     atm = ravel(result["atm"])
     hdp = ravel(result["hdp"])
     lda = ravel(result["lda"])
     llda = ravel(result["llda"])
-    return atm, hdp, lda, llda
+
+    tfidf_ltups = result["tfidf"]
+    tfidf = np.zeros(idf_vec_size)
+    for tfidf_idx, val in tfidf_ltups:
+        tfidf[tfidf_idx] = val
+    return atm, hdp, lda, llda, tfidf
 
 
 def invert_mapping(mapping):
@@ -162,10 +176,11 @@ def main():
 
         tfidf_fp = os.path.join(
             DIR_PATH, "data", "tfidf.{}.pkl".format(course_name))
-        with open(tfidf_fp, "wb") as tfidf_f:
-            tfidf_model = TfidfModel.load(tfidf_f)
+        # with open(tfidf_fp, "rb") as tfidf_f:
+        tfidf_model = TfidfModel.load(tfidf_fp)
+        idf_vec_size = len(tfidf_model.idfs)
 
-        analyze_course_results(course_name, course_results, tfidf_model)
+        analyze_course_results(course_name, course_results, idf_vec_size)
 
 
 if __name__ == "__main__":
