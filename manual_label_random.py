@@ -110,6 +110,17 @@ def inquire_questions(course_name, label_results,
                         prior_label_str = "unlabelable"
                     print("{} already labelled as '{}'".format(
                         question_id, prior_label_str))
+                    print("=" * 40)
+
+                # print suggestions by tfidf
+                try:
+                    q_tfidf_top_3_ranks = course_model_results["questions_topic_mapping"]["cosine"][question_id]["tfidf_rank"][:3]
+                    print("tfidf suggested:")
+                    for tfidf_id, tfidf_score in q_tfidf_top_3_ranks:
+                        print("\t", " > ".join(course_model_results["docid_to_labels"][str(tfidf_id)]), tfidf_score)
+                except Exception as e:
+                    print(e)
+                    pass
 
                 # label module
                 inq_module_choices = list(label_tree.keys())
