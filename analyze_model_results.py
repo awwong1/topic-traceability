@@ -7,6 +7,7 @@ from pickle import load
 from json import dump
 from scipy.spatial.distance import cosine, euclidean
 from gensim.models import TfidfModel
+from collections import Counter
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
@@ -31,10 +32,16 @@ def analyze_course_results(course_name, course_results, idf_vec_size):
         questions_topic_mapping[key] = {}
         answers_topic_mapping[key] = {}
 
+    course_unutilized_words = []
+    discussion_words = set()
+
     for question_id, question_result in question_results.items():
         all_words = question_result["all_words"]
         unutilized_words = question_result["unutilized_words"]
         atm, hdp, lda, llda, tfidf = flatten_gammas(question_result, idf_vec_size)
+
+        course_unutilized_words.extend(unutilized_words)
+        discussion_words = discussion_words.union(all_words)
 
         for dist_func_name, distance_options in distance_functions.items():
             question_topic_map = generate_topic_map(
@@ -62,16 +69,25 @@ def analyze_course_results(course_name, course_results, idf_vec_size):
     #         len(answer_results),
     #         datetime.now() - t_start), end="")
 
-    model_res_fp = os.path.join(
-        DIR_PATH, "data", "model_res.{}.json".format(course_name))
-    with open(model_res_fp, "w") as mf:
-        dump({
-            "docid_to_labels": docid_to_labels,
-            "questions_topic_mapping": questions_topic_mapping,
-            "answers_topic_mapping": answers_topic_mapping
-        }, mf)
     print()
 
+    if False:
+        # update?
+        model_res_fp = os.path.join(
+            DIR_PATH, "data", "model_res.{}.json".format(course_name))
+        with open(model_res_fp, "w") as mf:
+            dump({
+                "docid_to_labels": docid_to_labels,
+                "questions_topic_mapping": questions_topic_mapping,
+                "answers_topic_mapping": answers_topic_mapping
+            }, mf)
+    else:
+        unutilized_words_count = Counter(course_unutilized_words)
+        ordered_unutilized_words = []
+        for key, value in sorted(unutilized_words_count.items(), key=lambda x:x[1], reverse=True):
+            ordered_unutilized_words.append((key, value))
+        print(len(ordered_unutilized_words), len(discussion_words))
+        print(ordered_unutilized_words[:5])
 
 def generate_topic_map(distance_options, material_results, atm, hdp, lda, llda, tfidf, idf_vec_size):
     distance_function, sort_reverse = distance_options
