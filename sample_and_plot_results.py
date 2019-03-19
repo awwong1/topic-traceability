@@ -32,7 +32,7 @@ MODEL_NAME_STUBS = {
 }
 
 
-def setup_course_plot(course_name_stub, course_name_readable):
+def setup_course_plot(course_name_stub, course_name_readable, bootstrap=True):
     model_res_fp = os.path.join(
         DIR_PATH, "data", "model_res.{}.json".format(course_name_stub))
     results_fp = os.path.join(
@@ -70,9 +70,15 @@ def setup_course_plot(course_name_stub, course_name_readable):
     #         continue
     #     mmr_correct_question_labels[question_id] = top_tfid_ranks[0][0]
 
-    # Bootstrap sample 1000 from correct labels & calculate MRR
-    chosen_questions = random.choices(
-        list(mmr_correct_question_labels.keys()), k=1000)
+    # Sample 100 from correct labels & calculate MRR
+    base_chosen_questions = random.sample(
+        list(mmr_correct_question_labels.keys()), k=100)
+    # bootstrap 1000 from the 100 samples
+    if bootstrap:
+        chosen_questions = random.choices(base_chosen_questions, k=1000)
+    else:
+        chosen_questions = base_chosen_questions
+
     all_model_rrs = {}
     for qid in chosen_questions:
         correct = mmr_correct_question_labels[qid]
@@ -111,7 +117,7 @@ def setup_course_plot(course_name_stub, course_name_readable):
 
     # Plot the MMR box plots
     fig, ax = plt.subplots()
-    x_order = ["TF-IDF", "Author-Topic", "LDA", "HDP-LDA", "Labeled LDA"]
+    x_order = ["TF-IDF", "LDA", "HDP-LDA", "Author-Topic", "Labeled LDA"]
     ax.set_title("Traceability of {}".format(course_name_readable))
     sns.set(style="whitegrid", palette="pastel")
     sns.violinplot(
@@ -155,7 +161,7 @@ def main():
                 all_pd_data_dict["Model"].extend(v_list)
             elif k == "Reciprocal Rank":
                 all_pd_data_dict["Reciprocal_Rank"].extend(v_list)
-    df_path = os.path.join(DIR_PATH, "final_mrr.csv")
+    df_path = os.path.join(DIR_PATH, "final_rr.csv")
     all_pd_data = pd.DataFrame(data=all_pd_data_dict)
     all_pd_data.to_csv(df_path)
 

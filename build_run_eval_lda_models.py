@@ -237,13 +237,16 @@ def main():
         "design-patterns",
         "introduction-to-software-product-management",
         "object-oriented-design",
-        "reviews-and-metrics-for-software-improvements",
-        "service-oriented-architecture",
-        "software-architecture",
-        "software-processes-and-agile-practices",
-        "software-product-management-capstone",
+        # "reviews-and-metrics-for-software-improvements",
+        # "service-oriented-architecture",
+        # "software-architecture",
+        # "software-processes-and-agile-practices",
+        # "software-product-management-capstone",
     ]
 
+    all_corpus = []
+    all_docs = 0
+    all_tokens = 0
     # for course_name, course_vocabulary in vocabs.items():
     for course_name in COURSE_NAME_STUBS:
         # ==== Load the processed vocabulary into memory ==== #
@@ -260,6 +263,11 @@ def main():
             text) for text in course_texts]
 
         c_start = datetime.now()
+        print(course_name, len(course_dictionary), len(course_corpus))
+        all_tokens += len(course_dictionary)
+        all_docs += len(course_corpus)
+        all_corpus.extend([len(x) for x in course_corpus])
+        # continue
 
         print("BUILDING MODELS FOR {} ({})".format(course_name, c_start))
         lda_model, hdp_model, at_model, llda_model, llda_labels = build_lda_models(
@@ -299,6 +307,9 @@ def main():
 
         print("{} done! (e: {})\n".format(
             course_name, datetime.now() - c_start))
+    print(all_docs)
+    print(all_tokens)
+    print(sum(all_corpus)/len(all_corpus))
 
 
 if __name__ == "__main__":
