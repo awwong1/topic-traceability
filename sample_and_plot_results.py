@@ -28,7 +28,11 @@ MODEL_NAME_STUBS = {
     "hdp_rank": "HDP-LDA",
     "lda_rank": "LDA",
     "llda_rank": "Labeled LDA",
-    "tfidf_rank": "TF-IDF"
+    "tfidf_rank": "TF-IDF",
+    "tfidf_with_atm_rank": "TF-IDF + Author-Topic",
+    "tfidf_with_hdp_rank": "TF-IDF + HDP-LDA",
+    "tfidf_with_lda_rank": "TF-IDF + LDA",
+    "tfidf_with_llda_rank": "TF-IDF + Labeled LDA",
 }
 
 
@@ -61,18 +65,10 @@ def setup_course_plot(course_name_stub, course_name_readable, bootstrap=True):
         return {}
     cosine_ranks = course_model_results["questions_topic_mapping"]["cosine"]
 
-    # TEST USING LOW TFIDF SCORE AS SOURCE OF TRUTH FOR PLOTTING
-    # TFID_RANK_THRESHOLD = 0.8
-    # for question_id, model_rank_dict in cosine_ranks.items():
-    #     top_tfid_ranks = model_rank_dict["tfidf_rank"][:3]
-    #     # if top three have cosine sim > threshold, skip
-    #     if max([score for (tf_idx, score) in top_tfid_ranks]) > TFID_RANK_THRESHOLD:
-    #         continue
-    #     mmr_correct_question_labels[question_id] = top_tfid_ranks[0][0]
-
     # Sample 100 from correct labels & calculate MRR
     base_chosen_questions = random.sample(
         list(mmr_correct_question_labels.keys()), k=100)
+
     # bootstrap 1000 from the 100 samples
     if bootstrap:
         chosen_questions = random.choices(base_chosen_questions, k=1000)
@@ -117,7 +113,10 @@ def setup_course_plot(course_name_stub, course_name_readable, bootstrap=True):
 
     # Plot the MMR box plots
     fig, ax = plt.subplots()
-    x_order = ["TF-IDF", "LDA", "HDP-LDA", "Author-Topic", "Labeled LDA"]
+    x_order = [
+        "TF-IDF", "LDA", "HDP-LDA", "Author-Topic", "Labeled LDA",
+    ]
+
     ax.set_title("Traceability of {}".format(course_name_readable))
     sns.set(style="whitegrid", palette="pastel")
     sns.violinplot(
@@ -128,11 +127,53 @@ def setup_course_plot(course_name_stub, course_name_readable, bootstrap=True):
         scale="width",  # area, count, width
         inner="box",  # box, quartile, point, stick, None,
         bw="scott",  # scott, silverman, float
-        data=pd_data)
+        data=pd_data[pd_data.Model.isin(x_order)]
+    )
     for model_name, reciprocal_ranks in all_model_rrs.items():
         # draw mean on plot as line
         model_mean = statistics.mean(reciprocal_ranks)
-        col = x_order.index(MODEL_NAME_STUBS.get(model_name))
+        model_stub = MODEL_NAME_STUBS.get(model_name)
+        if model_stub not in x_order:
+            continue
+        col = x_order.index(model_stub)
+        ax.hlines(
+            y=model_mean,
+            xmin=col - 0.1,
+            xmax=col + 0.1,
+            color="#663399"
+            # color="#ffffff"
+        )
+    plt.ylim(0, 1.01)
+    plt.show()
+
+    # Plot the improvement of topic models on TF-IDF feature vector
+    fig, ax = plt.subplots()
+    x_order = [
+        "TF-IDF",
+        "TF-IDF + Author-Topic",
+        "TF-IDF + HDP-LDA",
+        "TF-IDF + LDA",
+        "TF-IDF + Labeled LDA"
+    ]
+    ax.set_title("TF-IDF Combined Traceability of {}".format(course_name_readable))
+    sns.set(style="whitegrid", palette="pastel")
+    sns.violinplot(
+        # sns.boxplot(
+        x=figure_label_model_name, y=figure_label_recip_rank,
+        order=x_order,
+        cut=0,
+        scale="width",  # area, count, width
+        inner="box",  # box, quartile, point, stick, None,
+        bw="scott",  # scott, silverman, float
+        data=pd_data[pd_data.Model.isin(x_order)]
+    )
+    for model_name, reciprocal_ranks in all_model_rrs.items():
+        # draw mean on plot as line
+        model_mean = statistics.mean(reciprocal_ranks)
+        model_stub = MODEL_NAME_STUBS.get(model_name)
+        if model_stub not in x_order:
+            continue
+        col = x_order.index(model_stub)
         ax.hlines(
             y=model_mean,
             xmin=col - 0.1,

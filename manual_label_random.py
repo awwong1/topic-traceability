@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Helper code to better enable researchers to manually label forum posts.
+"""
 import os
 import json
 import pickle

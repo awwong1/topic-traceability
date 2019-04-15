@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+Create the baseline TF-IDF model, along with the LDA topic models.
+Infer topic document distributions for all course material and forum content.
+"""
 import os
 import json
 from datetime import datetime

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""
+Load necessary values from the coursera sql extract into a sqlite3 database.
+"""
 import json
 import os
 import sys

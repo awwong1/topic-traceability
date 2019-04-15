@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Demo code, indicating value of research (show forum to course mapping)
+"""
 import os
 import json
 import pickle

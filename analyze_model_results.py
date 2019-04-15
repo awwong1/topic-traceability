@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""Calculate distances using the topic models on the course material/discussion
+posts feature vectors.
+"""
 import os
 import numpy as np
 from datetime import datetime
@@ -71,7 +74,7 @@ def analyze_course_results(course_name, course_results, idf_vec_size):
 
     print()
 
-    if False:
+    if True:
         # update?
         model_res_fp = os.path.join(
             DIR_PATH, "data", "model_res.{}.json".format(course_name))
@@ -81,13 +84,18 @@ def analyze_course_results(course_name, course_results, idf_vec_size):
                 "questions_topic_mapping": questions_topic_mapping,
                 "answers_topic_mapping": answers_topic_mapping
             }, mf)
-    else:
-        unutilized_words_count = Counter(course_unutilized_words)
-        ordered_unutilized_words = []
-        for key, value in sorted(unutilized_words_count.items(), key=lambda x:x[1], reverse=True):
-            ordered_unutilized_words.append((key, value))
-        print(len(ordered_unutilized_words), len(discussion_words))
-        print(ordered_unutilized_words[:5])
+
+    unutilized_words_count = Counter(course_unutilized_words)
+    ordered_unutilized_words = []
+    for key, value in sorted(unutilized_words_count.items(), key=lambda x:x[1], reverse=True):
+        ordered_unutilized_words.append((key, value))
+    print(len(ordered_unutilized_words), len(discussion_words))
+    print(ordered_unutilized_words[:5])
+    forum_only_vocabulary_fp = os.path.join(
+        DIR_PATH, "data", "forum_only_vocabulary.{}.json".format(course_name)
+    )
+    with open(forum_only_vocabulary_fp, "w") as f:
+        dump(ordered_unutilized_words, f)
 
 def generate_topic_map(distance_options, material_results, atm, hdp, lda, llda, tfidf, idf_vec_size):
     distance_function, sort_reverse = distance_options
@@ -97,6 +105,12 @@ def generate_topic_map(distance_options, material_results, atm, hdp, lda, llda, 
         "lda_rank": [],
         "llda_rank": [],
         "tfidf_rank": [],
+
+        # how much better do topic models improve on tf-idf?
+        "tfidf_with_atm_rank": [],
+        "tfidf_with_hdp_rank": [],
+        "tfidf_with_lda_rank": [],
+        "tfidf_with_llda_rank": [],
     }
 
     for doc_id, material_result in material_results.items():
@@ -122,6 +136,26 @@ def generate_topic_map(distance_options, material_results, atm, hdp, lda, llda, 
             distance_function(tfidf, m_tfidf)
         ))
 
+        # Do combination of TF-IDF + four other topic models
+        topic_map["tfidf_with_atm_rank"].append((
+            doc_id,
+            distance_function(np.concatenate((tfidf, atm)), np.concatenate((m_tfidf, m_atm)))
+        ))
+        topic_map["tfidf_with_hdp_rank"].append((
+            doc_id,
+            distance_function(np.concatenate((tfidf, hdp)), np.concatenate((m_tfidf, m_hdp)))
+        ))
+        topic_map["tfidf_with_lda_rank"].append((
+            doc_id,
+            distance_function(np.concatenate((tfidf, lda)), np.concatenate((m_tfidf, m_lda)))
+        ))
+        topic_map["tfidf_with_llda_rank"].append((
+            doc_id,
+            distance_function(np.concatenate((tfidf, llda)), np.concatenate((m_tfidf, m_llda)))
+        ))
+
+
+
     topic_map["atm_rank"].sort(
         key=lambda tup: tup[1], reverse=sort_reverse)
     topic_map["hdp_rank"].sort(
@@ -132,6 +166,15 @@ def generate_topic_map(distance_options, material_results, atm, hdp, lda, llda, 
         key=lambda tup: tup[1], reverse=sort_reverse)
     topic_map["tfidf_rank"].sort(
         key=lambda tup: tup[1], reverse=sort_reverse)
+    topic_map["tfidf_with_atm_rank"].sort(
+        key=lambda tup: tup[1], reverse=sort_reverse)
+    topic_map["tfidf_with_hdp_rank"].sort(
+        key=lambda tup: tup[1], reverse=sort_reverse)
+    topic_map["tfidf_with_lda_rank"].sort(
+        key=lambda tup: tup[1], reverse=sort_reverse)
+    topic_map["tfidf_with_llda_rank"].sort(
+        key=lambda tup: tup[1], reverse=sort_reverse)
+
     return topic_map
 
 
